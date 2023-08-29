@@ -4,3 +4,4 @@ toy_example/images/
 *.blend
 .idea
 __pycache__
+.vscode/
