@@ -1,3 +1,4 @@
+
 import collections
 import json
 import os
@@ -498,8 +499,11 @@ select_point_index = []
 radius = 0
 center = (0, 0, 0)
 bounding_box = []
+is_select_sphere = False
+is_load_colmap = False
 
-
+relative_image_path = ''
+sfm_path = ''
 # ------------------------------------------------------------------------
 #    Utility scripts
 # ------------------------------------------------------------------------
@@ -899,6 +903,7 @@ def generate_camera_plane_texture(image_sequence):
 
 
 def load_camera(colmap_data, context):
+    global relative_image_path
     if 'Input Camera' in bpy.data.cameras:
         camera = bpy.data.cameras['Input Camera']
         bpy.data.cameras.remove(camera)
@@ -928,6 +933,11 @@ def load_camera(colmap_data, context):
     # Load image file
     sort_image_id = np.argsort(image_names)
     image_folder_path = bpy.path.abspath(bpy.context.scene.my_tool.colmap_path + 'images/')
+    
+    if not os.path.exists(image_folder_path):
+        image_folder_path = bpy.path.abspath(bpy.context.scene.my_tool.colmap_path + '../images/')
+        relative_image_path = '../images/'
+
 
     ## make a copy of images to comply with the continuous numbering requirement of sequence
     blender_img_path = bpy.context.scene.my_tool.colmap_path + 'blender_images/'
@@ -969,8 +979,7 @@ def load_camera(colmap_data, context):
         set_keyframe_camera(camera, image_quaternion[i_id], image_translation[i_id], frame_id)
         set_keyframe_image(frame_id, plane)
 
-    # enable texture mode to visualize images
-    enable_texture_mode()
+
 
     # keep point cloud highlighted
     select_all_vert('Point Cloud')
@@ -1051,6 +1060,7 @@ class LoadCOLMAP(Operator):
         return context.scene.my_tool.colmap_path != ''
 
     def execute(self, context):
+        global is_load_colmap
         scene = context.scene
         mytool = scene.my_tool
 
@@ -1069,7 +1079,12 @@ class LoadCOLMAP(Operator):
             bpy.data.curves.remove(curve, do_unlink=True)
 
         # load data
-        cameras, images, points3D = read_model(bpy.path.abspath(mytool.colmap_path + 'sparse/'), ext='.bin')
+        
+        sfm_path = bpy.path.abspath(mytool.colmap_path + 'sparse/')
+        if os.path.exists(sfm_path+'0/'):
+            sfm_path = sfm_path+'0/'
+
+        cameras, images, points3D = read_model(sfm_path, ext='.bin')
         display_pointcloud(points3D)
 
         global colmap_data, point_cloud_vertices
@@ -1111,7 +1126,10 @@ class LoadCOLMAP(Operator):
 
         # load camera info
         load_camera(colmap_data, context)
-
+        is_load_colmap = True
+        bpy.ops.object.mode_set(mode="OBJECT")
+        # enable texture mode to visualize images
+        enable_texture_mode()
         return {'FINISHED'}
 
 
@@ -1251,6 +1269,62 @@ class BoundSphere(Operator):
 
         return {'FINISHED'}
 
+import mathutils
+class SelectSphere(Operator):
+    '''
+    select one sphere to define the nerf bound
+    '''
+
+    bl_label = "Select current sphere as bound"
+    bl_idname = "addon.select_bound_sphere"
+
+    @classmethod
+    def poll(cls, context):
+        global is_load_colmap
+        global center
+        if is_load_colmap and len(bpy.context.selected_objects)==1 and "Sphere" in bpy.context.selected_objects[0].name:
+            sphere_obj = bpy.context.selected_objects[0]
+            current_center = sphere_obj.matrix_world @ mathutils.Vector((0, 0, 0))
+
+            current_center = (current_center[0],current_center[1],current_center[2])
+            return current_center != center
+
+    def execute(self, context):
+        global radius
+        global center
+        global bounding_box
+        global is_select_sphere
+
+        delete_bounding_sphere()
+
+        sphere_obj = bpy.context.selected_objects[0]
+
+        # get the center of the sphere in world coordinates
+        center = sphere_obj.matrix_world @ mathutils.Vector((0, 0, 0))
+        center = (center[0],center[1],center[2])
+        # get the radius of the sphere in world units
+        radius = sphere_obj.dimensions[0] / 2
+
+        wm = sphere_obj.matrix_world
+
+        # get the bounding box corners in world coordinates
+        corners = [wm @ mathutils.Vector(v) for v in sphere_obj.bound_box]
+
+        # get the minimum and maximum values of each axis
+        x_min = min([v[0] for v in corners])
+        x_max = max([v[0] for v in corners])
+        y_min = min([v[1] for v in corners])
+        y_max = max([v[1] for v in corners])
+        z_min = min([v[2] for v in corners])
+        z_max = max([v[2] for v in corners])
+
+        bounding_box = [(x_min, x_max), (y_min, y_max), (z_min, z_max)]
+
+        #bpy.context.scene.collection.objects.link(sphere_obj)
+        is_select_sphere = True
+        
+        return {'FINISHED'}
+
 
 class HideShowBox(Operator):
     bl_label = "Hide/Show Bounding Box"
@@ -1315,7 +1389,8 @@ class ExportSceneParameters(Operator):
 
     @classmethod
     def poll(cls, context):
-        return 'Bounding Sphere' in context.scene.collection.objects
+        return 'Bounding Sphere' in context.scene.collection.objects \
+            or is_select_sphere 
 
     def execute(self, context):
         global radius, center, colmap_data, bounding_box
@@ -1375,7 +1450,7 @@ class ExportSceneParameters(Operator):
             c2w = np.linalg.inv(w2c)
             c2w = c2w @ flip_mat  # convert to GL convention used in iNGP
 
-            frame = {"file_path": 'images/' + img.name, "transform_matrix": c2w.tolist()}
+            frame = {"file_path": relative_image_path + img.name, "transform_matrix": c2w.tolist()}
             # print(frame)
             out["frames"].append(frame)
 
@@ -1504,6 +1579,8 @@ class BoundingPanel(NeuralangeloCustomPanel, bpy.types.Panel):
         row.alignment = 'CENTER'
         row.label(text="Edit Bounding Box")
 
+        
+
         x_row = box.row()
         x_row.prop(mytool, "box_slider", index=0, slider=True, text='X min')
         x_row.prop(mytool, "box_slider", index=1, slider=True, text='X max')
@@ -1530,6 +1607,7 @@ class BoundingPanel(NeuralangeloCustomPanel, bpy.types.Panel):
         row.label(text="Create Bounding Sphere")
         box.row().operator("addon.add_bound_sphere")
         box.row().operator("addon.hide_show_sphere")
+        box.row().operator("addon.select_bound_sphere")
         box.row().operator('addon.export_scene_param')
 
 
@@ -1546,6 +1624,7 @@ classes = (
     LoadCOLMAP,
     Crop,
     BoundSphere,
+    SelectSphere,
     HideShowBox,
     HideShowSphere,
     HideShowCroppedPoints,
