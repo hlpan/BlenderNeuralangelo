@@ -1,4 +1,8 @@
 
+# import debugpy
+# debugpy.listen(5678)
+# debugpy.wait_for_client()
+
 import collections
 import json
 import os
@@ -502,7 +506,7 @@ bounding_box = []
 is_select_sphere = False
 is_load_colmap = False
 
-relative_image_path = ''
+#relative_image_path = ''
 sfm_path = ''
 # ------------------------------------------------------------------------
 #    Utility scripts
@@ -903,7 +907,7 @@ def generate_camera_plane_texture(image_sequence):
 
 
 def load_camera(colmap_data, context):
-    global relative_image_path
+    #global relative_image_path
     if 'Input Camera' in bpy.data.cameras:
         camera = bpy.data.cameras['Input Camera']
         bpy.data.cameras.remove(camera)
@@ -934,9 +938,9 @@ def load_camera(colmap_data, context):
     sort_image_id = np.argsort(image_names)
     image_folder_path = bpy.path.abspath(bpy.context.scene.my_tool.colmap_path + 'images/')
     
-    if not os.path.exists(image_folder_path):
-        image_folder_path = bpy.path.abspath(bpy.context.scene.my_tool.colmap_path + '../images/')
-        relative_image_path = '../images/'
+    # if not os.path.exists(image_folder_path):
+    #     image_folder_path = bpy.path.abspath(bpy.context.scene.my_tool.colmap_path + '../images/')
+    #     relative_image_path = '../images/'
 
 
     ## make a copy of images to comply with the continuous numbering requirement of sequence
@@ -1399,6 +1403,8 @@ class ExportSceneParameters(Operator):
         fl_y = intrinsic_param[0][1]
         cx = intrinsic_param[0][2]
         cy = intrinsic_param[0][3]
+
+
         image_width = np.array([camera.width for camera in colmap_data['cameras'].values()])
         image_height = np.array([camera.height for camera in colmap_data['cameras'].values()])
         w = image_width[0]
@@ -1448,9 +1454,13 @@ class ExportSceneParameters(Operator):
             w2c = np.concatenate([rotation, translation], 1)
             w2c = np.concatenate([w2c, np.array([0, 0, 0, 1])[None]], 0)
             c2w = np.linalg.inv(w2c)
+
+            c2w[:3, -1] -= center  # center scene at origin,
+            scale = 1/radius
+            c2w[:3, -1] *= scale
             c2w = c2w @ flip_mat  # convert to GL convention used in iNGP
 
-            frame = {"file_path": relative_image_path + img.name, "transform_matrix": c2w.tolist()}
+            frame = {"file_path": "images/" + img.name, "transform_matrix": c2w.tolist()}
             # print(frame)
             out["frames"].append(frame)
 
