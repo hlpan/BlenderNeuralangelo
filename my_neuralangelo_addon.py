@@ -1325,6 +1325,16 @@ class SelectSphere(Operator):
         bounding_box = [(x_min, x_max), (y_min, y_max), (z_min, z_max)]
 
         #bpy.context.scene.collection.objects.link(sphere_obj)
+
+
+    
+        for obj in bpy.data.objects:
+            obj.select_set(True)
+
+        scale_factor=1/radius
+        bpy.ops.transform.translate(value=(-center[0], -center[1], -center[2]))
+        bpy.ops.transform.resize(value=(scale_factor, scale_factor, scale_factor), center_override=bpy.context.scene.cursor.location)
+
         is_select_sphere = True
         
         return {'FINISHED'}
